@@ -33,16 +33,29 @@ function fromXPath(XPath) {
 
 /***************************** Normal distribution ****************************/
 
-var sigma_x = 10;
-var sigma_y = 10;
-var cutoff_x = 3 * sigma_x;
-var cutoff_y = 3 * sigma_y;
+var sigma = 10;
+var kernel_support = 3 * sigma;
 
-function normal_distribution(mu_x, mu_y, sigma_x, sigma_y) {
-	return function(x,y) {
-		return Math.exp(- 0.5 * Math.pow(x-mu_x,2)/Math.pow(sigma_x,2) 
-			          - 0.5 * Math.pow(y-mu_y,2)/Math.pow(sigma_y,2)) / (2 * Math.PI * sigma_x * sigma_y);
+function normal_distribution(sigma) {
+	return function(x) {
+		return Math.exp(-0.5 * Math.pow(x/sigma,2)) / (Math.sqrt(2 * Math.PI) * sigma);
 	};
+}
+
+/***************************** Normal distribution ****************************/
+
+function L2_distance(x1, y1, x2, y2) {
+	return Math.sqrt(Math.pow(x2-x1,2) + Math.pow(y2-y1,2));
+}
+
+/********************************** Colormap **********************************/
+
+// TODO
+function colormap(points) {
+	var sorted_;
+	return function (value) {
+
+	}
 }
 
 /************************************ Pose ************************************/
@@ -79,15 +92,167 @@ Click.prototype.toString = function() {
 /******************************** IntensityMap ********************************/
 
 function IntensityMap(width, height) {
-
+	this.width    = width;
+	this.height   = height;
+	this.data     = new Float32Array(width * height);
+	this.integral = 0;
+	this.min      = 0;
+	this.max      = 0;
 }
+
+IntensityMap.prototype.length = function() {
+	return this.width * this.height;
+}
+
+IntensityMap.prototype.get_index = function(i) {
+	return this.data[i];
+}
+
+IntensityMap.prototype.get_pixel = function(x, y) {
+	return this.get_index(y * this.width + x);
+}
+
+IntensityMap.prototype.get_normalized_pixel = function(x, y) {
+	var normalized_pixel = (this.get_pixel(x,y) - this.min) / (this.max - this.min);
+	if (isNaN(normalized_pixel)) return 0
+	else return normalized_pixel;
+}
+
+IntensityMap.prototype.accumulate = function(i, value) {
+	this.data[i] += value;
+	this.integral += value;
+
+	// Maintain min and max data as we go for normalization
+	if (this.data[i] < this.min) this.min = this.data[i];
+	if (this.data[i] > this.max) this.max = this.data[i];
+}
+
+IntensityMap.prototype.accumulate_pixel = function(x, y, value) {
+	this.accumulate(y * this.width + x, value);
+}
+
+IntensityMap.prototype.update_density = function(position) {
+	// Extract the kernel substract window around the position
+	var x_min = Math.max(position.x - kernel_support, 0);
+	var x_max = Math.min(position.x + kernel_support, this.width);
+	var y_min = Math.max(position.y - kernel_support, 0);
+	var y_max = Math.min(position.y + kernel_support, this.height);
+	var kernel_width  = x_max - x_min + 1;
+	var kernel_height = y_max - y_min + 1;
+
+	// Prepare the kernel function centered on the position
+	var kernel = normal_distribution(sigma);
+
+	// Evaluate and add the kernel
+	for(var x=0; x<kernel_width; ++x) {
+		for(var y=0 ; y<kernel_height ; ++y) {
+			// From kernel to global coordinates
+			var global_x = x_min + x;
+			var global_y = y_min + y;
+
+			// Evaluate the kernel at this point
+			var distance = L2_distance(position.x, position.y, global_x, global_y);
+			//var value = (kernel_support - distance) / kernel_support;
+			var value = kernel(distance);
+
+			// Accumulate the value
+			this.accumulate_pixel(global_x, global_y, value);
+		}
+	}
+}
+
+IntensityMap.prototype.render = function(canvas) {
+	var context = canvas.getContext("2d");
+
+	// Clear the canvas
+	context.clearRect(0, 0, canvas.width, canvas.height);
+	var canvas_image = context.getImageData(0, 0, canvas.width, canvas.height);
+	var data = canvas_image.data;
+
+	// Render
+	for (var x=0 ; x<this.width ; ++x) {
+		for (var y=0 ; y<this.height ; ++y) {
+			//var mapped_rgba = ;
+			data[((this.width * y) + x) * 4]     = 255; // red
+			data[((this.width * y) + x) * 4 + 1] = 0;   // green
+			data[((this.width * y) + x) * 4 + 2] = 0;   // blue
+			data[((this.width * y) + x) * 4 + 3] = 255 * this.get_normalized_pixel(x, y); // alpha
+		}
+	}
+
+	//  Write rendered image
+	context.putImageData(canvas_image, 0, 0);
+}
+
+/********************************** ArgosMap **********************************/
+
+function ArgosMap(width, height) {
+	this.width  = width;
+	this.height = height;
+	this.click_intensity_map = new IntensityMap(width, height);
+	this.pose_intensity_map  = new IntensityMap(width, height);
+}
+
+ArgosMap.prototype.integrate_click = function(click) {
+	var recovered_element = fromXPath(click.target);
+	var recovered_x = Math.round(recovered_element.offsetLeft 
+	                           + recovered_element.clientWidth  * click.offset_x);
+	var recovered_y = Math.round(recovered_element.offsetTop 
+	                           + recovered_element.clientHeight * click.offset_y);
+
+	this.click_intensity_map.update_density({'x':recovered_x, 'y':recovered_y});
+}
+
+ArgosMap.prototype.integrate_pose = function(recovered_element, pose) {
+	var recovered_x = Math.round(recovered_element.offsetLeft 
+	                           + recovered_element.clientWidth  * pose.offset_x);
+	var recovered_y = Math.round(recovered_element.offsetTop 
+	                           + recovered_element.clientHeight * pose.offset_y);
+
+	this.click_intensity_map.update_density({'x':recovered_x, 'y':recovered_y});
+}
+
+ArgosMap.prototype.build = function(database) {
+	// Incrementally build the click intensity map
+	for (var i=0 ; i<database.clicks.length ; ++i) {
+		this.integrate_click(database.clicks[i]);
+	}
+
+	// Incrementally build the pose intensity map
+	for (var element_xpath in database.poses) {
+		var recovered_element = fromXPath(element_xpath);
+		var in_element_trajectory = database.poses[element_xpath];
+
+		for (var i=0 ; i<in_element_trajectory.length ; ++i) {
+			var pose = in_element_trajectory[i];
+			this.integrate_pose(recovered_element, pose);
+		}
+	}
+}
+
+ArgosMap.prototype.render = function(canvas) {
+	this.click_intensity_map.render(canvas);
+	//this.pose_intensity_map.render(canvas);
+}
+
+var Argos_visualization;
 
 /******************************** ArgosDatabase *******************************/
 
-// TODO
+function ArgosDatabase() {
+	this.clicks = new Array();
+	this.poses  = new Array();
+}
 
-var clicks = new Array();
-var trajectory = new Array();
+ArgosDatabase.prototype.record_click = function(click) {
+	this.clicks.push(click);
+}
+
+ArgosDatabase.prototype.record_pose = function(target_XPath, pose) {
+	this.poses[target_XPath].push(pose);
+}
+
+var Argos_database = new ArgosDatabase();
 
 /********************************* Monitoring *********************************/
 
@@ -96,7 +261,6 @@ var trajectory = new Array();
 function monitor_movements() {
 	$("body").mousemove(function(e) {
 		process_movement(e);
-		visualize();
 	});
 }
 
@@ -104,9 +268,11 @@ function process_movement(movement_event) {
 	var new_pose = new Pose(movement_event);
 	var target_xpath = getXPath(movement_event.target);
 
-	if (!(target_xpath in trajectory)) trajectory[target_xpath] = new Array();
+	if (!(target_xpath in Argos_database.poses)) Argos_database.poses[target_xpath] = new Array();
 
-	trajectory[target_xpath].push(new_pose);
+	Argos_database.record_pose(target_xpath, new_pose);
+	Argos_visualization.integrate_pose(target_xpath, new_pose);
+	Argos_visualization.render(Argos_visualization_canvas());
 }
 
 // Clicks
@@ -114,109 +280,17 @@ function process_movement(movement_event) {
 function monitor_clicks() {
 	$(document).click(function(e) {
 		process_click(e);
-		visualize();
 	});
 }
 
 function process_click(click_event) {
 	var new_click = new Click(click_event);
-	clicks.push(new_click);
+	Argos_database.record_click(new_click);
+	Argos_visualization.integrate_click(new_click);
+	Argos_visualization.render(Argos_visualization_canvas());
 }
 
-/****************************** DensityEstimation *****************************/
-
-function click_intensity_kernel(canvas, click) {
-	var recovered_element = fromXPath(click.target);
-	var recovered_x = Math.round(recovered_element.offsetLeft + recovered_element.clientWidth  * click.offset_x);
-	var recovered_y = Math.round(recovered_element.offsetTop  + recovered_element.clientHeight * click.offset_y);
-
-	// 
-	var x_min = Math.max(recovered_x - cutoff_x, 0);
-	var x_max = Math.min(recovered_x + cutoff_x, canvas.width);
-	var y_min = Math.max(recovered_y - cutoff_y, 0);
-	var y_max = Math.min(recovered_y + cutoff_y, canvas.height);
-	var kernel_width  = x_max - x_min + 1;
-	var kernel_height = y_max - y_min + 1;
-	//console.log("(" + recovered_x + "," + recovered_y + ")" + " " + "(" + x_min + "-" + x_max + "," + y_min + "-" + y_max  + ")");
-
-	// Get access to the canvas pixel data
-	var context = canvas.getContext("2d");
-	var canvas_image = context.getImageData(x_min, y_min, kernel_width, kernel_height);
-	var data = canvas_image.data;
-
-	//
-	var kernel = normal_distribution(recovered_x, recovered_y, sigma_x, sigma_y);
-
-	// 
-	for(var y=0 ; y<kernel_height ; ++y) {
-		for(var x=0; x<kernel_width; ++x) {
-			var global_x = x_min + x;
-			var global_y = y_min + y;
-			var value = (cutoff_x - Math.sqrt(Math.pow(recovered_x-global_x,2)+Math.pow(recovered_y-global_y,2))) / cutoff_x;
-			//var value = kernel(global_x, global_y);
-
-			canvas_image.data[((kernel_width * y) + x) * 4]     = 255; // red
-			canvas_image.data[((kernel_width * y) + x) * 4 + 1] = 0;   // green
-			canvas_image.data[((kernel_width * y) + x) * 4 + 2] = 0;   // blue
-			canvas_image.data[((kernel_width * y) + x) * 4 + 3] = 255 * value; // alpha
-		}
-	}
-
-	// Draw the visualization
-	context.putImageData(canvas_image, x_min, y_min);
-}
-
-/******************************** Visualization *******************************/
-
-function visualize_movements(canvas) {
-	var context = canvas.getContext("2d");
-
-	for (var element_xpath in trajectory) {
-		var recovered_element = fromXPath(element_xpath);
-		var in_element_trajectory = trajectory[element_xpath];
-		context.beginPath();
-
-		// First pose
-		var first_pose = in_element_trajectory[0];
-		context.moveTo(recovered_element.offsetLeft + recovered_element.clientWidth  * first_pose.offset_x, 
-		               recovered_element.offsetTop  + recovered_element.clientHeight * first_pose.offset_y);
-		
-		for (var i=0 ; i<in_element_trajectory.length ; ++i) {
-			var pose = in_element_trajectory[i];
-			context.lineTo(recovered_element.offsetLeft + recovered_element.clientWidth  * pose.offset_x, 
-		                     recovered_element.offsetTop  + recovered_element.clientHeight * pose.offset_y);
-		}
-
-		context.stroke();
-	}
-}
-
-function visualize_clicks(canvas) {
-	var context = canvas.getContext("2d");
-
-	// Clear it
-	context.clearRect(0, 0, canvas.width, canvas.height);
-
-	// Allocate an intensity map
-	var intensity_map_buffer = new ArrayBuffer(canvas.width * canvas.height);
-	var intensity_map = new DataView(intensity_map_buffer);
-	//var intensity_map = new IntensityMap(canvas.width, canvas.height);
-
-	// Build an intensity using kernel density estimation
-	for (var i=0 ; i<clicks.length ; ++i) {
-		click_intensity_kernel(canvas, clicks[i]);
-		//intensity_map.setFloat32(b, v);
-		//intensity_map.getFloat32(b);
-	}
-
-	// Normalize the intensity array
-	// TODO
-
-	// Render the intensity array
-	// TODO
-}
-
-/******************************** Visualization *******************************/
+/************************* Visualization infrastructure ************************/
 
 function create_visualization_canvas(element) {
 	// Create a container div, as the canvas element can't have 
@@ -249,30 +323,29 @@ function create_visualization_canvas(element) {
 
 // Setup monitoring of the element to always fit it
 $(window).resize(function() {
-	update_visualization_canvas($(".Argos_visualization_canvas"));
+	update_visualization_canvas(Argos_visualization_canvas());
 });
 
 function update_visualization_canvas(canvas) {
-	container = $(canvas).parent()[0];
-	parent = $(container).parent()[0];
-	canvas.attr("width",  parent.scrollWidth);
-	canvas.attr("height", parent.scrollHeight);
-	canvas.css("width",  toString(parent.scrollWidth)  + "px");
-	canvas.css("height", toString(parent.scrollHeight) + "px");
+	container = $(canvas).parent().get(0);
+	parent = $(container).parent().get(0);
+	$(canvas).attr("width",  parent.scrollWidth);
+	$(canvas).attr("height", parent.scrollHeight);
+	$(canvas).css("width",  toString(parent.scrollWidth)  + "px");
+	$(canvas).css("height", toString(parent.scrollHeight) + "px");
 
 	// Update visualization
-	visualize();
+	Argos_visualization = new ArgosMap(parent.scrollWidth, parent.scrollHeight);
+	Argos_visualization.build(Argos_database);
+	Argos_visualization.render($(canvas).get(0));
 }
 
 function visualization_canvas(element) {
 	return $(element).children(".Argos_visualization_canvas_container").children(".Argos_visualization_canvas")[0];
 }
 
-function visualize() {
-	var canvas  = visualization_canvas($("body"));
-
-	visualize_clicks(canvas);
-	//visualize_movements(canvas);
+function Argos_visualization_canvas() {
+	return $(".Argos_visualization_canvas").get(0);
 }
 
 /********************************** Database **********************************/
