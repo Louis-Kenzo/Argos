@@ -203,13 +203,14 @@ ArgosMap.prototype.integrate_click = function(click) {
 	this.click_intensity_map.update_density({'x':recovered_x, 'y':recovered_y});
 }
 
-ArgosMap.prototype.integrate_pose = function(recovered_element, pose) {
+ArgosMap.prototype.integrate_pose = function(element_xpath, pose) {
+	var recovered_element = fromXPath(element_xpath);
 	var recovered_x = Math.round(recovered_element.offsetLeft 
 	                           + recovered_element.clientWidth  * pose.offset_x);
 	var recovered_y = Math.round(recovered_element.offsetTop 
 	                           + recovered_element.clientHeight * pose.offset_y);
 
-	this.click_intensity_map.update_density({'x':recovered_x, 'y':recovered_y});
+	this.pose_intensity_map.update_density({'x':recovered_x, 'y':recovered_y});
 }
 
 ArgosMap.prototype.build = function(database) {
@@ -225,7 +226,7 @@ ArgosMap.prototype.build = function(database) {
 
 		for (var i=0 ; i<in_element_trajectory.length ; ++i) {
 			var pose = in_element_trajectory[i];
-			this.integrate_pose(recovered_element, pose);
+			this.integrate_pose(element_xpath, pose);
 		}
 	}
 }
