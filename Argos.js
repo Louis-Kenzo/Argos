@@ -50,13 +50,46 @@ function L2_distance(x1, y1, x2, y2) {
 
 /********************************** Colormap **********************************/
 
-// TODO
-function colormap(points) {
-	var sorted_;
-	return function (value) {
-
-	}
+function smaller_color(c1, c2) {
+	return c1.position - c2.position;
 }
+
+function colormap(points) {
+	var sorted_points = points.sort(smaller_color);
+
+	return function (value) {
+		for(var i=1 ; i<sorted_points.length ; ++i) {
+			if (value <= sorted_points[i].position) {
+				var low  = sorted_points[i-1];
+				var high = sorted_points[i];
+
+				var relative_position = (value - low.position) / (high.position - low.position);
+
+				var interpolated = {'r':low.r + relative_position * (high.r - low.r),
+				                    'g':low.g + relative_position * (high.g - low.g),
+				                    'b':low.b + relative_position * (high.b - low.b),
+				                    'a':low.a + relative_position * (high.a - low.a)};
+
+				return interpolated;
+			}
+		}
+	};
+}
+
+var jet = colormap([{'position':0,    'r':0,    'g':0,    'b':0.4,  'a':0},
+                    {'position':0.33, 'r':0,    'g':0.95, 'b':0.95, 'a':0.3},
+                    {'position':0.66, 'r':0.95, 'g':0.95, 'b':0,    'a':0.6},
+                    {'position':1,    'r':0.95, 'g':0,    'b':0,    'a':0.8}]);
+
+var hot = colormap([{'position':0,    'r':0,    'g':0,    'b':0,    'a':0},
+                    {'position':0.33, 'r':0.95, 'g':0,    'b':0,    'a':0.4},
+                    {'position':0.66, 'r':0.95, 'g':0.95, 'b':0,    'a':0.6},
+                    {'position':1,    'r':1,    'g':1,    'b':1,    'a':0.8}]);
+
+var hsv = colormap([{'position':0,    'r':0.95, 'g':0,    'b':0,    'a':0},
+                    {'position':0.33, 'r':0,    'g':0.95, 'b':0,    'a':0.4},
+                    {'position':0.66, 'r':0,    'g':0,    'b':0.95, 'a':0.6},
+                    {'position':1,    'r':0.95, 'g':0,    'b':0,    'a':0.8}]);
 
 /************************************ Pose ************************************/
 
@@ -169,14 +202,19 @@ IntensityMap.prototype.render = function(canvas) {
 	var canvas_image = context.getImageData(0, 0, canvas.width, canvas.height);
 	var data = canvas_image.data;
 
+	// Prepare a colormap
+	var color_map = jet;
+
 	// Render
 	for (var x=0 ; x<this.width ; ++x) {
 		for (var y=0 ; y<this.height ; ++y) {
-			//var mapped_rgba = ;
-			data[((this.width * y) + x) * 4]     = 255; // red
-			data[((this.width * y) + x) * 4 + 1] = 0;   // green
-			data[((this.width * y) + x) * 4 + 2] = 0;   // blue
-			data[((this.width * y) + x) * 4 + 3] = 255 * this.get_normalized_pixel(x, y); // alpha
+			var value = this.get_normalized_pixel(x, y);
+			var mapped_rgba = color_map(value);
+
+			data[((this.width * y) + x) * 4]     = mapped_rgba.r * 255; // red
+			data[((this.width * y) + x) * 4 + 1] = mapped_rgba.g * 255; // green
+			data[((this.width * y) + x) * 4 + 2] = mapped_rgba.b * 255; // blue
+			data[((this.width * y) + x) * 4 + 3] = mapped_rgba.a * 255; // alpha
 		}
 	}
 
@@ -232,8 +270,8 @@ ArgosMap.prototype.build = function(database) {
 }
 
 ArgosMap.prototype.render = function(canvas) {
-	this.click_intensity_map.render(canvas);
-	//this.pose_intensity_map.render(canvas);
+	//this.click_intensity_map.render(canvas);
+	this.pose_intensity_map.render(canvas);
 }
 
 var Argos_visualization;
