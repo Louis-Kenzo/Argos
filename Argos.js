@@ -81,15 +81,18 @@ var jet = colormap([{'position':0,    'r':0,    'g':0,    'b':0.4,  'a':0},
                     {'position':0.66, 'r':0.95, 'g':0.95, 'b':0,    'a':0.6},
                     {'position':1,    'r':0.95, 'g':0,    'b':0,    'a':0.8}]);
 
-var hot = colormap([{'position':0,    'r':0,    'g':0,    'b':0,    'a':0},
-                    {'position':0.33, 'r':0.95, 'g':0,    'b':0,    'a':0.4},
-                    {'position':0.66, 'r':0.95, 'g':0.95, 'b':0,    'a':0.6},
-                    {'position':1,    'r':1,    'g':1,    'b':1,    'a':0.8}]);
+var hot = colormap([{'position':0,    'r':0,    'g':0,    'b':0, 'a':0},
+                    {'position':0.33, 'r':0.95, 'g':0,    'b':0, 'a':0.4},
+                    {'position':0.66, 'r':0.95, 'g':0.95, 'b':0, 'a':0.6},
+                    {'position':1,    'r':1,    'g':1,    'b':1, 'a':0.8}]);
 
 var hsv = colormap([{'position':0,    'r':0.95, 'g':0,    'b':0,    'a':0},
                     {'position':0.33, 'r':0,    'g':0.95, 'b':0,    'a':0.4},
                     {'position':0.66, 'r':0,    'g':0,    'b':0.95, 'a':0.6},
                     {'position':1,    'r':0.95, 'g':0,    'b':0,    'a':0.8}]);
+
+var fog = colormap([{'position':0, 'r':0, 'g':0, 'b':0, 'a':0.95},
+                    {'position':1, 'r':0, 'g':0, 'b':0, 'a':0}]);
 
 /************************************ Pose ************************************/
 
@@ -203,7 +206,7 @@ IntensityMap.prototype.render = function(canvas) {
 	var data = canvas_image.data;
 
 	// Prepare a colormap
-	var color_map = jet;
+	var color_map = fog;
 
 	// Render
 	for (var x=0 ; x<this.width ; ++x) {
